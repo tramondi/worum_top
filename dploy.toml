@@ -1,0 +1,11 @@
+name = "worum_top"
+
+ports = []
+
+volumes = [
+  "/app/data",
+]
+
+env = [
+  "APP_PORT",
+]

@@ -1,0 +1,27 @@
+[package]
+name = "worum_top"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.log]
+version = "0.4"
+
+[dependencies.dotenv]
+version = "0.15.0"
+
+[dependencies.pretty_env_logger]
+version = "0.4"
+
+[dependencies.teloxide]
+version = "0.12"
+features = ["macros"]
+
+[dependencies.tokio]
+version = "1.8"
+features = ["rt-multi-thread", "macros"]
+
+[dependencies.reqwest]
+version = "0.12.5"
+
+[dependencies.scraper]
+version = "0.19.1"
