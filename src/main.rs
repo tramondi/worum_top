@@ -22,6 +22,13 @@ enum Command {
     Top,
 }
 
+static WORUM_TOP_THREADS: &str = "https://woman.ru/forum/?sort=1d";
+static SELECTOR_THREAD: &str = ".list-item";
+static SELECTOR_THREAD_TITLE: &str = ".list-item__title";
+static SELECTOR_THREAD_LINK: &str = ".list-item__link";
+static SELECTOR_THREAD_TEXT: &str = ".card_topic-start .card__comment";
+static THREAD_TEXT_LIMIT: usize = 140;
+
 #[tokio::main]
 async fn main() {
     dotenv().ok();
@@ -34,26 +41,30 @@ async fn main() {
     Command::repl(bot, command_top).await;
 }
 
+async fn fetch_content(url: &str) -> Option<String> {
+    let Ok(resp) = reqwest::get(url).await else {
+        return None
+    };
+
+    let Ok(content) = resp.text().await else {
+        return None
+    };
+
+    Some(content)
+}
+
 async fn forum_get_top_threads() -> Option<Vec<WorumThread>> {
     let mut threads = Vec::<WorumThread>::new();
 
-    let resp = reqwest::get("https://woman.ru/forum/?sort=1d").await;
-    if resp.is_err() {
+    let Some(content) = fetch_content(WORUM_TOP_THREADS).await else {
         return None
-    }
-
-    let content = resp.unwrap().text().await;
-    if content.is_err() {
-        return None
-    }
-
-    let content = content.unwrap();
+    };
 
     let html = Html::parse_document(&content);
 
-    let title_selector = Selector::parse(".list-item__title").unwrap();
-    let link_selector = Selector::parse(".list-item__link").unwrap();
-    let item_selector = Selector::parse(".list-item").unwrap();
+    let item_selector = Selector::parse(SELECTOR_THREAD).unwrap();
+    let title_selector = Selector::parse(SELECTOR_THREAD_TITLE).unwrap();
+    let link_selector = Selector::parse(SELECTOR_THREAD_LINK).unwrap();
 
     for node in html.select(&item_selector) {
         let mut thread = WorumThread::default();
@@ -63,7 +74,8 @@ async fn forum_get_top_threads() -> Option<Vec<WorumThread>> {
         }
 
         if let Some(link) = node.select(&link_selector).nth(0) {
-            thread.link = link.value().attr("href").unwrap().to_string();
+            let thread_path = link.value().attr("href").unwrap().to_string();
+            thread.link = format!("https://woman.ru{}", thread_path);
         }
 
         threads.push(thread);
@@ -72,15 +84,31 @@ async fn forum_get_top_threads() -> Option<Vec<WorumThread>> {
     Some(threads)
 }
 
+async fn forum_get_thread_text(thread_url: &str) -> Option<String> {
+    let mut text = String::default();
+
+    let Some(content) = fetch_content(thread_url).await else {
+        return None
+    };
+
+    let html = Html::parse_document(&content);
+
+    let text_selector = Selector::parse(SELECTOR_THREAD_TEXT).unwrap();
+
+    for node in html.select(&text_selector) {
+        text = node.text().collect::<String>();
+    }
+
+    Some(text)
+}
+
 async fn command_top(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
     match cmd {
         Command::Top => {
-            let worum_top = forum_get_top_threads().await;
-            if worum_top.is_none() {
+            let Some(worum_top) = forum_get_top_threads().await else {
                 return Ok(())
-            }
+            };
 
-            let worum_top = worum_top.unwrap();
             if worum_top.len() == 0 {
                 log::error!("zero top");
                 return Ok(())
@@ -88,9 +116,28 @@ async fn command_top(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()>
 
             let thread = &worum_top[0];
             let title = &thread.title;
-            let link = format!("https://woman.ru{}", thread.link);
+            let link = &thread.link;
 
-            let answer = format!("Тема дня: {}", md::link(&link, title));
+            let Some(text) = forum_get_thread_text(link).await else {
+                return Ok(())
+            };
+
+            let topic = md::link(link, title);
+
+            let mut text = text
+                .replace(".", "\\.")
+                .replace("#", "\\#");
+
+            if text.len() > THREAD_TEXT_LIMIT {
+                text = text.chars()
+                    .take(THREAD_TEXT_LIMIT)
+                    .collect::<String>();
+                text += "…";
+            }
+
+            let text = md::italic(&text);
+
+            let answer = format!("Тема дня: {}\n\n{}", topic, text);
 
             bot.send_message(msg.chat.id, answer)
                 .parse_mode(ParseMode::MarkdownV2)
