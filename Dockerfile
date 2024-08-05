@@ -1,9 +1,9 @@
-from rust:latest
+FROM rust:latest
 
-workdir /app
+WORKDIR /app
 
-copy . .
-run cargo fetch
-run cargo build
+COPY . .
+RUN cargo fetch
+RUN cargo build --release
 
-cmd ["cargo", "run"]
+CMD ["cargo", "run"]

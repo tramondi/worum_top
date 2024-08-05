@@ -18,11 +18,21 @@ struct WorumThread {
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Поддерживаемые команды:")]
 enum Command {
-    #[command(description = "Топ тема на Woman-форуме")]
+    #[command(description = "Тема дня")]
     Top,
+    #[command(description = "Тема недели")]
+    Week,
+    #[command(description = "Тема месяца")]
+    Month,
+    #[command(description = "Топ тема за всё время")]
+    Ever,
 }
 
-static WORUM_TOP_THREADS: &str = "https://woman.ru/forum/?sort=1d";
+static WORUM_TOP_THREADS_DAY: &str = "https://woman.ru/forum/?sort=1d";
+static WORUM_TOP_THREADS_WEEK: &str = "https://woman.ru/forum/?sort=7d";
+static WORUM_TOP_THREADS_MONTH: &str = "https://woman.ru/forum/?sort=30d";
+static WORUM_TOP_THREADS_EVER: &str = "https://woman.ru/forum/?sort=all";
+
 static SELECTOR_THREAD: &str = ".list-item";
 static SELECTOR_THREAD_TITLE: &str = ".list-item__title";
 static SELECTOR_THREAD_LINK: &str = ".list-item__link";
@@ -38,7 +48,7 @@ async fn main() {
 
     let bot = Bot::from_env();
 
-    Command::repl(bot, command_top).await;
+    Command::repl(bot, command_handle).await;
 }
 
 async fn fetch_content(url: &str) -> Option<String> {
@@ -53,10 +63,10 @@ async fn fetch_content(url: &str) -> Option<String> {
     Some(content)
 }
 
-async fn forum_get_top_threads() -> Option<Vec<WorumThread>> {
+async fn forum_get_threads(url: &str) -> Option<Vec<WorumThread>> {
     let mut threads = Vec::<WorumThread>::new();
 
-    let Some(content) = fetch_content(WORUM_TOP_THREADS).await else {
+    let Some(content) = fetch_content(url).await else {
         return None
     };
 
@@ -102,49 +112,48 @@ async fn forum_get_thread_text(thread_url: &str) -> Option<String> {
     Some(text)
 }
 
-async fn command_top(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
-    match cmd {
-        Command::Top => {
-            let Some(worum_top) = forum_get_top_threads().await else {
-                return Ok(())
-            };
-
-            if worum_top.len() == 0 {
-                log::error!("zero top");
-                return Ok(())
-            }
-
-            let thread = &worum_top[0];
-            let title = &thread.title;
-            let link = &thread.link;
-
-            let Some(text) = forum_get_thread_text(link).await else {
-                return Ok(())
-            };
-
-            let topic = md::link(link, title);
-
-            let mut text = text
-                .replace(".", "\\.")
-                .replace("#", "\\#");
-
-            if text.len() > THREAD_TEXT_LIMIT {
-                text = text.chars()
-                    .take(THREAD_TEXT_LIMIT)
-                    .collect::<String>();
-                text += "…";
-            }
-
-            let text = md::italic(&text);
-
-            let answer = format!("Тема дня: {}\n\n{}", topic, text);
-
-            bot.send_message(msg.chat.id, answer)
-                .parse_mode(ParseMode::MarkdownV2)
-                .send()
-                .await?;
-        }
+async fn command_handle(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
+    let threads_url = match cmd {
+        Command::Top => WORUM_TOP_THREADS_DAY,
+        Command::Week => WORUM_TOP_THREADS_WEEK,
+        Command::Month => WORUM_TOP_THREADS_MONTH,
+        Command::Ever => WORUM_TOP_THREADS_EVER,
     };
+
+    let Some(threads) = forum_get_threads(threads_url).await else {
+        return Ok(())
+    };
+
+    if threads.len() == 0 {
+        log::error!("no threads");
+        return Ok(())
+    }
+
+    let thread = &threads[0];
+    let title = &thread.title;
+    let link = &thread.link;
+
+    let Some(text) = forum_get_thread_text(link).await else {
+        return Ok(())
+    };
+
+    let topic = md::link(link, title);
+    let mut text = md::escape(&text);
+
+    if text.len() > THREAD_TEXT_LIMIT {
+        text = text.chars()
+            .take(THREAD_TEXT_LIMIT)
+            .collect::<String>();
+        text += "…";
+    }
+
+    let text = md::italic(&text);
+    let answer = format!("{}\n\n{}", topic, text);
+
+    bot.send_message(msg.chat.id, answer)
+        .parse_mode(ParseMode::MarkdownV2)
+        .send()
+        .await?;
 
     Ok(())
 }
