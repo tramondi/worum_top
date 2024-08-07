@@ -6,4 +6,4 @@ COPY . .
 RUN cargo fetch
 RUN cargo build --release
 
-CMD ["cargo", "run"]
+ENTRYPOINT ["./target/release/worum_top"]
