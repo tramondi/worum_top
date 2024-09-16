@@ -2581,6 +2581,7 @@ dependencies = [
  "teloxide",
  "tokio",
  "tokio-cron-scheduler",
+ "url",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use teloxide::{
     prelude::*,
-    types::{ParseMode, ChatId},
+    types::{ParseMode, ChatId, InputFile},
     utils::{
         markdown as md,
         command::BotCommands,
@@ -10,11 +10,13 @@ use teloxide::{
 use dotenv::dotenv;
 use scraper::{Html, Selector};
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
+use url::Url;
 
 #[derive(Debug,Default)]
 struct WorumThread {
     pub title: String,
     pub link: String,
+    pub photo_url: Option<String>,
 }
 
 #[derive(BotCommands, Clone)]
@@ -41,6 +43,7 @@ static SELECTOR_THREAD: &str = ".list-item";
 static SELECTOR_THREAD_TITLE: &str = ".list-item__title";
 static SELECTOR_THREAD_LINK: &str = ".list-item__link";
 static SELECTOR_THREAD_TEXT: &str = ".card_topic-start .card__comment";
+static SELECTOR_THREAD_IMAGE: &str = ".card_topic-start .imagesList_itemImg";
 static THREAD_TEXT_LIMIT: usize = 140;
 
 type ChatIds = Vec<ChatId>;
@@ -87,11 +90,11 @@ impl App {
         let job = Job::new("1/3 * * * * * *", move |uuid, _scheduler| {
             println!("job {uuid} !!");
 
-            let chat_ids = self.chat_ids.lock().unwrap();
-
-            for chat_id in chat_ids.iter() {
-                self.bot_send_msg(*chat_id, Command::Top);
-            }
+            // let chat_ids = self.chat_ids.lock().unwrap();
+            //
+            // for chat_id in chat_ids.iter() {
+            //     self.bot_send_msg(*chat_id, Command::Top);
+            // }
         })?;
 
         scheduler.add(job).await?;
@@ -103,12 +106,21 @@ impl App {
     async fn command_handle(&self, msg: Message, cmd: Command)
         -> ResponseResult<()>
     {
-        self.bot_send_msg(msg.chat.id, cmd).await
+        let mut args = Vec::<&str>::new();
+
+        if let Some(msg_text) = msg.text() {
+            args = msg_text.trim().split(" ").collect();
+        }
+
+        self.bot_send_msg(msg.chat.id, cmd, args).await
     }
 
-    async fn bot_send_msg(&self, chat_id: ChatId, command: Command)
-        -> ResponseResult<()>
-    {
+    async fn bot_send_msg(
+        &self,
+        chat_id: ChatId,
+        command: Command,
+        args: Vec<&str>,
+    ) -> ResponseResult<()> {
         let threads_url = match command {
             Command::Subscribe => {
                 let mut chat_ids = self.chat_ids.lock().unwrap();
@@ -125,6 +137,14 @@ impl App {
             Command::Ever => WORUM_TOP_THREADS_EVER,
         };
 
+        let mut count: usize = 1;
+
+        if args.len() >= 1 {
+            if let Ok(arg_count) = args[0].parse::<usize>() {
+                count = arg_count;
+            }
+        }
+
         let Some(threads) = forum_get_threads(threads_url).await else {
             return Ok(())
         };
@@ -134,32 +154,50 @@ impl App {
             return Ok(())
         }
 
-        let thread = &threads[0];
-        let title = &thread.title;
-        let link = &thread.link;
+        let mut answer = String::from("");
 
-        let Some(text) = forum_get_thread_text(link).await else {
-            return Ok(())
-        };
+        for n in 0..count {
+            let thread = &threads[n];
+            let title = &thread.title;
+            let link = &thread.link;
 
-        let topic = md::link(link, md::escape(&title).as_str());
-        let mut text = md::escape(&text);
+            let Some(text) = forum_get_thread_text(link).await else {
+                return Ok(())
+            };
 
-        if text.len() > THREAD_TEXT_LIMIT {
-            text = text.chars()
-                .take(THREAD_TEXT_LIMIT)
-                .collect::<String>();
-            text += "…";
+            let topic = md::link(link, md::escape(&title).as_str());
+            let mut text = md::escape(&text);
+
+            if text.len() > THREAD_TEXT_LIMIT {
+                text = text.chars()
+                    .take(THREAD_TEXT_LIMIT)
+                    .collect::<String>();
+                text += "…";
+            }
+
+            let text = md::italic(&text);
+            let thread_block = format!("{} {}\n\n{}\n\n", n + 1, topic, text);
+
+            answer += &thread_block;
         }
 
-        let text = md::italic(&text);
-        let answer = format!("{}\n\n{}", topic, text);
-
-        self.bot
-            .send_message(chat_id, answer)
-            .parse_mode(ParseMode::MarkdownV2)
-            .send()
-            .await?;
+        // if let Some(src) = &thread.photo_url {
+        //     let url = Url::parse(src).unwrap();
+        //     let photo = InputFile::url(url);
+        //
+        //     self.bot
+        //         .send_photo(chat_id, photo)
+        //         .caption(answer)
+        //         .parse_mode(ParseMode::MarkdownV2)
+        //         .send()
+        //         .await?;
+        // } else {
+            self.bot
+                .send_message(chat_id, answer)
+                .parse_mode(ParseMode::MarkdownV2)
+                .send()
+                .await?;
+        // }
 
         Ok(())
     }
@@ -189,17 +227,27 @@ async fn forum_get_threads(url: &str) -> Option<Vec<WorumThread>> {
     let item_selector = Selector::parse(SELECTOR_THREAD).unwrap();
     let title_selector = Selector::parse(SELECTOR_THREAD_TITLE).unwrap();
     let link_selector = Selector::parse(SELECTOR_THREAD_LINK).unwrap();
+    let img_selector = Selector::parse(SELECTOR_THREAD_IMAGE).unwrap();
 
     for node in html.select(&item_selector) {
         let mut thread = WorumThread::default();
 
         if let Some(title) = node.select(&title_selector).nth(0) {
-            thread.title = title.inner_html();
+            thread.title = title.text().collect();
         }
 
         if let Some(link) = node.select(&link_selector).nth(0) {
             let thread_path = link.value().attr("href").unwrap().to_string();
             thread.link = format!("https://woman.ru{}", thread_path);
+        }
+
+        if let Some(photo_url) = node.select(&img_selector).nth(0) {
+            let photo_url = photo_url.value().attr("src").unwrap().to_string();
+            let photo_url = format!("https:{}", photo_url);
+
+            println!("photo url: {photo_url}");
+
+            thread.photo_url = Some(photo_url);
         }
 
         threads.push(thread);
