@@ -1,16 +1,18 @@
 use std::sync::{Arc, Mutex};
 use teloxide::{
     prelude::*,
-    types::{ParseMode, ChatId, InputFile},
+    types::{
+        ParseMode,
+        ChatId,
+    },
     utils::{
-        markdown as md,
+        html,
         command::BotCommands,
     },
 };
 use dotenv::dotenv;
 use scraper::{Html, Selector};
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
-use url::Url;
 
 #[derive(Debug,Default)]
 struct WorumThread {
@@ -56,6 +58,8 @@ struct App {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
+
+    println!("debug.token: {}", std::env::var("TELOXIDE_TOKEN").unwrap());
 
     pretty_env_logger::init();
     log::info!("Starting WorumTop bot");
@@ -139,9 +143,17 @@ impl App {
 
         let mut count: usize = 1;
 
-        if args.len() >= 1 {
-            if let Ok(arg_count) = args[0].parse::<usize>() {
-                count = arg_count;
+        if args.len() > 1 {
+            if let Ok(arg_count) = args[1].parse::<usize>() {
+                count = if arg_count > 5 {
+                    5
+                } else if arg_count < 1 {
+                    1
+                } else {
+                    arg_count
+                };
+            } else {
+                println!("failed to parse {}", args[1]);
             }
         }
 
@@ -165,8 +177,8 @@ impl App {
                 return Ok(())
             };
 
-            let topic = md::link(link, md::escape(&title).as_str());
-            let mut text = md::escape(&text);
+            let topic = html::link(link, title);
+            let mut text = text;
 
             if text.len() > THREAD_TEXT_LIMIT {
                 text = text.chars()
@@ -175,29 +187,20 @@ impl App {
                 text += "…";
             }
 
-            let text = md::italic(&text);
-            let thread_block = format!("{} {}\n\n{}\n\n", n + 1, topic, text);
+            let text = html::italic(&text);
+            let thread_block = format!(
+                "Топ-{} тема:\n{}\n\n{}\n\n", n + 1, topic, text);
+
+            let thread_block = thread_block.as_str();
 
             answer += &thread_block;
         }
 
-        // if let Some(src) = &thread.photo_url {
-        //     let url = Url::parse(src).unwrap();
-        //     let photo = InputFile::url(url);
-        //
-        //     self.bot
-        //         .send_photo(chat_id, photo)
-        //         .caption(answer)
-        //         .parse_mode(ParseMode::MarkdownV2)
-        //         .send()
-        //         .await?;
-        // } else {
-            self.bot
-                .send_message(chat_id, answer)
-                .parse_mode(ParseMode::MarkdownV2)
-                .send()
-                .await?;
-        // }
+        self.bot
+            .send_message(chat_id, answer)
+            .parse_mode(ParseMode::Html)
+            .send()
+            .await?;
 
         Ok(())
     }
