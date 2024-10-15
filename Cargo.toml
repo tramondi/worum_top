@@ -37,3 +37,9 @@ version = "0.10.2"
 
 [dependencies.url]
 version = "2.5.2"
+
+[dependencies.sqlite]
+version = "0.36.1"
+
+[dependencies.rand]
+version = "0.8.5"
