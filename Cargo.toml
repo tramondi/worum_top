@@ -3,6 +3,12 @@ name = "worum_top"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "worum_top"
+path = "src/main.rs"
+test = false
+bench = false
+
 [dependencies.log]
 version = "0.4"
 
@@ -13,7 +19,7 @@ version = "0.15.0"
 version = "0.4"
 
 [dependencies.teloxide]
-version = "0.12"
+version = "0.13"
 features = ["macros"]
 
 [dependencies.tokio]
@@ -28,3 +34,12 @@ version = "0.19.1"
 
 [dependencies.tokio-cron-scheduler]
 version = "0.10.2"
+
+[dependencies.url]
+version = "2.5.2"
+
+[dependencies.sqlite]
+version = "0.36.1"
+
+[dependencies.rand]
+version = "0.8.5"
